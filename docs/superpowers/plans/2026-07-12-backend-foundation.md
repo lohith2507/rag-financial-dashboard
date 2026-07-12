@@ -638,11 +638,14 @@ def generate_transactions(months: int = 6, seed: int = 42) -> list[GeneratedTxn]
 
 
 def _plant_anomalies(txns: list[GeneratedTxn], rng: random.Random) -> None:
-    normal_max = max(t.amount for t in txns if t.category not in ("Rent", "Salary"))
+    # Baseline is the max across ALL normal transactions (incl. salary), so
+    # planted anomalies exceed every non-anomalous amount — the test relies on this.
+    all_amounts = [t.amount for t in txns]
+    normal_max = max(all_amounts)
     count = rng.randint(2, 4)
     victims = rng.sample([t for t in txns if t.category in CATEGORY_PROFILES], count)
     for t in victims:
-        t.amount = round(normal_max * rng.uniform(3.0, 6.0), 2)
+        t.amount = round(normal_max * rng.uniform(1.5, 2.5), 2)
         t.is_anomaly = True
         t.description = f"UNUSUAL: large {t.category.lower()} charge at {t.merchant}"
 
