@@ -2,18 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up the backend foundation — a seeded PostgreSQL+pgvector database full of synthetic, embedded financial transactions, reachable through a pluggable provider layer.
+**Goal:** Stand up the backend foundation — a seeded PostgreSQL database full of synthetic, embedded financial transactions, reachable through a pluggable provider layer.
 
-**Architecture:** FastAPI project with SQLAlchemy 2.0 models over Postgres+pgvector. A synthetic generator produces realistic transactions (with planted anomalies for later verification). A pluggable provider layer wraps Groq (chat) and NVIDIA NIM (embeddings) behind interfaces, so any provider is a drop-in swap. An ingestion pipeline embeds transactions and stores vectors.
+**Architecture:** FastAPI project with SQLAlchemy 2.0 models over a local PostgreSQL 18. A synthetic generator produces realistic transactions (with planted anomalies for later verification). A pluggable provider layer wraps Groq (chat) and NVIDIA NIM (embeddings) behind interfaces, so any provider is a drop-in swap. An ingestion pipeline embeds transactions and stores them. Embeddings are stored as a Postgres array column; similarity search is computed in Python (dataset is small — no native vector extension needed).
 
-**Tech Stack:** Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, SQLAlchemy 2.0, Alembic, pgvector, Docker Compose, pytest, httpx.
+**Tech Stack:** Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, SQLAlchemy 2.0, Alembic, PostgreSQL 18, pytest, httpx.
+
+> **Environment note (2026-07-12):** Docker is not installed on this machine and PG18 on Windows lacks the `pgvector` extension (fiddly to build without Docker). Decision: use the existing local PostgreSQL 18, store embeddings as `double precision[]` (Postgres ARRAY), and compute cosine similarity in Python. pgvector/Docker remain a documented production-scale swap, out of scope for this plan.
 
 ## Global Constraints
 
 - Python 3.12+.
 - SQLAlchemy 2.0 style (typed `Mapped[...]`, `mapped_column`).
 - Pydantic v2.
-- Embedding vector dimension: **1024** (NVIDIA `nv-embedqa-e5-v5`).
+- Embedding vector dimension: **1024** (NVIDIA `nv-embedqa-e5-v5`), stored as `double precision[]` (Postgres `ARRAY(Float)`).
+- Database is the local PostgreSQL 18 (`postgresql+psycopg://finuser:finpass@localhost:5432/findb`). No Docker, no pgvector extension.
 - Secrets ONLY via environment / `.env`; `.env` MUST be gitignored. `.env.example` committed with placeholders. NEVER commit real API keys.
 - All dependencies pinned in `pyproject.toml`.
 - Every task ends with passing tests and a commit.
@@ -212,41 +215,22 @@ git commit -m "feat: add settings loader"
 
 ---
 
-### Task 3: Docker Compose with Postgres + pgvector
+### Task 3: Local database connectivity check
 
 **Files:**
-- Create: `docker-compose.yml`
 - Create: `scripts/wait_for_db.py`
 
 **Interfaces:**
-- Consumes: `DATABASE_URL` env.
-- Produces: a running Postgres on `localhost:5432` with the `vector` extension available (image ships it). DB `findb`, user `finuser`, password `finpass`.
+- Consumes: `DATABASE_URL` env (`postgresql+psycopg://finuser:finpass@localhost:5432/findb`).
+- Produces: `scripts/wait_for_db.py`, runnable as `python ../scripts/wait_for_db.py`, which exits 0 when the local Postgres accepts a connection.
 
-- [ ] **Step 1: Create `docker-compose.yml`**
-
-```yaml
-services:
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: finuser
-      POSTGRES_PASSWORD: finpass
-      POSTGRES_DB: findb
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U finuser -d findb"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-
-volumes:
-  pgdata:
+**Prerequisite (already done manually by the human before this task):** the `finuser` role and `findb` database exist in the local PostgreSQL 18:
+```sql
+CREATE ROLE finuser LOGIN PASSWORD 'finpass';
+CREATE DATABASE findb OWNER finuser;
 ```
 
-- [ ] **Step 2: Create a readiness checker**
+- [ ] **Step 1: Create a readiness checker**
 
 `scripts/wait_for_db.py`:
 ```python
@@ -261,7 +245,7 @@ from app.config import get_settings
 
 def main() -> int:
     dsn = get_settings().database_url.replace("+psycopg", "")
-    for _ in range(30):
+    for _ in range(15):
         try:
             with psycopg.connect(dsn, connect_timeout=2):
                 print("DB ready")
@@ -277,28 +261,19 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 3: Start the database and verify readiness**
+- [ ] **Step 2: Verify connectivity against the local Postgres**
 
-Run (from `backend/`, with env loaded):
+Run (from `backend/`, with `DATABASE_URL` set in `.env` or env):
 ```bash
-docker compose -f ../docker-compose.yml up -d
 python ../scripts/wait_for_db.py
 ```
-Expected: `DB ready` printed, exit 0.
+Expected: `DB ready` printed, exit 0. (If it prints `waiting for db: ...` and exits 1, the `finuser`/`findb` setup above was not run — stop and report.)
 
-- [ ] **Step 4: Verify the vector extension can be created**
-
-Run:
-```bash
-docker compose -f ../docker-compose.yml exec db psql -U finuser -d findb -c "CREATE EXTENSION IF NOT EXISTS vector; SELECT '1'::vector(3) IS NULL;"
-```
-Expected: command succeeds (prints `f`).
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add docker-compose.yml scripts/wait_for_db.py
-git commit -m "feat: add postgres+pgvector via docker compose"
+git add scripts/wait_for_db.py
+git commit -m "feat: add local postgres readiness check"
 ```
 
 ---
@@ -306,6 +281,7 @@ git commit -m "feat: add postgres+pgvector via docker compose"
 ### Task 4: Database models, session, and Alembic baseline
 
 **Files:**
+- Modify: `backend/pyproject.toml` (remove the unused `pgvector` dependency)
 - Create: `backend/app/db.py`
 - Create: `backend/app/models.py`
 - Create: `backend/alembic.ini`
@@ -319,9 +295,13 @@ git commit -m "feat: add postgres+pgvector via docker compose"
 - Consumes: `get_settings().database_url`.
 - Produces:
   - `Base` (DeclarativeBase), `engine`, `SessionLocal`.
-  - `Transaction(id:int, date:date, merchant:str, amount:float, category:str, description:str, is_anomaly:bool, embedding:list[float]|None)` — table `transactions`, `embedding` is `Vector(1024)`.
+  - `Transaction(id:int, date:date, merchant:str, amount:float, category:str, description:str, is_anomaly:bool, embedding:list[float]|None)` — table `transactions`, `embedding` is `ARRAY(Float)` (a plain Postgres float array; no pgvector).
   - `Insight(id:int, period:str, summary_text:str, generated_at:datetime)` — table `insights`.
   - `ChatMessage(id:int, session_id:str, role:str, content:str, tool_calls:dict|None, created_at:datetime)` — table `chat_messages`.
+
+- [ ] **Step 0: Remove the unused pgvector dependency**
+
+In `backend/pyproject.toml`, delete the line `"pgvector>=0.3.6",` from `dependencies`. (We store embeddings as a plain Postgres float array; no native vector extension.) No reinstall required.
 
 - [ ] **Step 1: Create the DB session module**
 
@@ -347,8 +327,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 ```python
 from datetime import date, datetime
 
-from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, String, Text, func
+from sqlalchemy import ARRAY, JSON, Boolean, Date, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -366,7 +345,7 @@ class Transaction(Base):
     category: Mapped[str] = mapped_column(String(80), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBED_DIM), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
 
 
 class Insight(Base):
@@ -437,7 +416,6 @@ Revision ID: 0001_baseline
 Revises:
 Create Date: 2026-07-12
 """
-import pgvector.sqlalchemy
 import sqlalchemy as sa
 from alembic import op
 
@@ -448,7 +426,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.create_table(
         "transactions",
         sa.Column("id", sa.Integer, primary_key=True),
@@ -458,7 +435,7 @@ def upgrade() -> None:
         sa.Column("category", sa.String(80), index=True),
         sa.Column("description", sa.Text),
         sa.Column("is_anomaly", sa.Boolean, server_default=sa.false()),
-        sa.Column("embedding", pgvector.sqlalchemy.Vector(1024), nullable=True),
+        sa.Column("embedding", sa.ARRAY(sa.Float), nullable=True),
     )
     op.create_table(
         "insights",
@@ -1048,15 +1025,15 @@ Expected: `Seeded <N> transactions`. This confirms Groq/NVIDIA wiring works with
 ## Self-Review
 
 **Spec coverage (this plan's slice — Backend Foundation):**
-- Postgres + pgvector store → Tasks 3, 4 ✓
-- Data model (transactions/insights/chat_messages, `vector(1024)`, `is_anomaly` ground truth) → Task 4 ✓
+- Local PostgreSQL 18 store (no Docker/pgvector) → Tasks 3, 4 ✓
+- Data model (transactions/insights/chat_messages, `ARRAY(Float)` embedding of dim 1024, `is_anomaly` ground truth) → Task 4 ✓
 - Synthetic generator with planted anomalies → Task 5 ✓
 - Pluggable provider layer (Groq chat + NVIDIA embeddings, swappable) → Tasks 6, 7 ✓
 - Ingestion (embed + store) → Task 8 ✓
 - Secret hygiene (`.env` gitignored, `.env.example`, no committed keys) → Task 1 ✓
-- Docker Compose one-command DB → Task 3 ✓
-- Deferred to later plans (correctly out of scope here): RAG agent/tools + eval (Plan 2), insights + anomaly detection logic (Plan 3), React frontend (Plan 4).
+- DB connectivity check against local Postgres → Task 3 ✓
+- Deferred to later plans (correctly out of scope here): RAG agent/tools + eval (Plan 2, incl. Python cosine semantic search), insights + anomaly detection logic (Plan 3), React frontend (Plan 4). Docker/pgvector containerization is a documented production-scale swap, not in these plans.
 
 **Placeholder scan:** No TBD/TODO; every code step contains complete, runnable code. ✓
 
-**Type consistency:** `EmbeddingProvider.embed(texts)->list[list[float]]` used consistently in Tasks 6 and 8; `Vector(1024)`/`EMBED_DIM=1024` consistent across models, migration, and tests; `GeneratedTxn` fields consistent between generator (Task 5) and ingestion (Task 8). ✓
+**Type consistency:** `EmbeddingProvider.embed(texts)->list[list[float]]` used consistently in Tasks 6 and 8; `ARRAY(Float)` embedding / `EMBED_DIM=1024` consistent across models, migration, and tests; `GeneratedTxn` fields consistent between generator (Task 5) and ingestion (Task 8). ✓

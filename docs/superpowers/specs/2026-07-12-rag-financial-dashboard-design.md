@@ -43,6 +43,10 @@ React (Vite + TS, Tremor)  ──HTTP──>  FastAPI backend
 - `providers/` — pluggable LLM + embedding interface (Groq, NVIDIA, Ollama, OpenAI)
 - `api/` — FastAPI routers
 
+## Environment adaptation (2026-07-12)
+
+The dev machine has no Docker and its local PostgreSQL 18 lacks the `pgvector` extension (hard to build on Windows without Docker). Adopted decision for the initial build: use the **local PostgreSQL 18**, store embeddings as a **`double precision[]` array column**, and compute **cosine similarity in Python** (the synthetic dataset is small, so brute-force search is instant). `pgvector` + Docker containerization remain the documented **production-scale swap** but are out of scope for the current plans. The rest of the design below is unchanged; read "pgvector" as "array column + Python cosine" for now.
+
 ## Data model (Postgres + pgvector)
 
 **`transactions`**
