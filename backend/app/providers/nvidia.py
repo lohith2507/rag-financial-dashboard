@@ -4,16 +4,19 @@ NVIDIA_URL = "https://integrate.api.nvidia.com/v1/embeddings"
 
 
 class NvidiaEmbeddingProvider:
-    def __init__(self, api_key: str, model: str, timeout: float = 30.0):
+    def __init__(
+        self, api_key: str, model: str, timeout: float = 30.0, input_type: str = "passage"
+    ):
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        self._input_type = input_type
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         resp = httpx.post(
             NVIDIA_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"input": texts, "model": self._model, "input_type": "passage"},
+            json={"input": texts, "model": self._model, "input_type": self._input_type},
             timeout=self._timeout,
         )
         resp.raise_for_status()
