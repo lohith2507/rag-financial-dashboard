@@ -29,7 +29,7 @@ React (Vite + TS, Tremor)  ──HTTP──>  FastAPI backend
       ┌──────────────────────────────────┼────────────────────────────┐
       │                                  │                              │
  Postgres + pgvector             Groq (chat/gen)            NVIDIA NIM (embeddings)
- (transactions + embeddings)     llama-3.3-70b              nv-embedqa-e5-v5
+ (transactions + embeddings)     openai/gpt-oss-120b        nv-embedqa-e5-v5
 ```
 
 ### Backend modules (each with one responsibility)
@@ -43,16 +43,16 @@ React (Vite + TS, Tremor)  ──HTTP──>  FastAPI backend
 - `providers/` — pluggable LLM + embedding interface (Groq, NVIDIA, Ollama, OpenAI)
 - `api/` — FastAPI routers
 
-## Environment adaptation (2026-07-12)
+## Environment adaptation (2026-07-18)
 
-The dev machine has no Docker and its local PostgreSQL 18 lacks the `pgvector` extension (hard to build on Windows without Docker). Adopted decision for the initial build: use the **local PostgreSQL 18**, store embeddings as a **`double precision[]` array column**, and compute **cosine similarity in Python** (the synthetic dataset is small, so brute-force search is instant). `pgvector` + Docker containerization remain the documented **production-scale swap** but are out of scope for the current plans. The rest of the design below is unchanged; read "pgvector" as "array column + Python cosine" for now.
+No Docker on the dev machine; local Postgres setup was a blocker. **Adopted default:** **SQLite** file DB (`sqlite:///./data/findb.db` under `backend/`), embeddings stored as a **JSON** `list[float]` of dim **1024**, **cosine similarity in Python**. See `docs/superpowers/specs/2026-07-18-sqlite-default-design.md`. PostgreSQL + pgvector + Docker remain the documented **production-scale swap**, out of scope for the current plans. Below, read "pgvector" as "JSON embedding column + Python cosine".
 
-## Data model (Postgres + pgvector)
+## Data model (SQLite)
 
 **`transactions`**
 - `id`, `date`, `merchant`, `amount`, `category`, `description`
 - `is_anomaly` (boolean, seeded ground truth for eval)
-- `embedding vector(1024)`
+- `embedding` (JSON list of 1024 floats)
 
 **`insights`**
 - `id`, `period`, `summary_text`, `generated_at`
@@ -128,8 +128,8 @@ React + Vite + TypeScript, TanStack Query for data fetching, Tailwind + Tremor f
 | Layer | Choice |
 |---|---|
 | Backend | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2.0, Alembic |
-| Database | PostgreSQL + pgvector |
-| LLM (chat/gen) | Groq (llama-3.3-70b) — pluggable |
+| Database | SQLite (default); Postgres + pgvector as production-scale swap |
+| LLM (chat/gen) | Groq (openai/gpt-oss-120b) — pluggable |
 | Embeddings | NVIDIA NIM (nv-embedqa-e5-v5) — pluggable |
 | Frontend | React + Vite + TypeScript, TanStack Query, Tailwind, Tremor |
 | Infra | Docker Compose, optional GitHub Actions CI |

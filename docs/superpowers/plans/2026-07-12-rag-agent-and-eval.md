@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Python 3.12+, SQLAlchemy 2.0 style, Pydantic v2.
-- Embedding dim **1024**; embeddings stored as `ARRAY(Float)`; similarity computed in Python (no pgvector).
+- Embedding dim **1024**; embeddings stored as JSON `list[float]` (SQLite default); similarity computed in Python (no pgvector).
 - Tests NEVER make real network calls — chat/embedding providers are faked in tests. Live-API runs happen only in the manual eval step.
 - The agent tool loop is **bounded at 5 rounds** (`MAX_TOOL_ROUNDS = 5`) — never an unbounded loop.
 - "Spend" always excludes category `Salary` (income is not spend).

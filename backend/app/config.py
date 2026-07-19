@@ -7,10 +7,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     nvidia_api_key: str = ""
     nvidia_embed_model: str = "nvidia/nv-embedqa-e5-v5"
-    database_url: str = "postgresql+psycopg://finuser:finpass@localhost:5432/findb"
+    database_url: str = "sqlite:///./data/findb.db"
 
 
 @lru_cache

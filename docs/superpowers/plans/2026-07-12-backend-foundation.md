@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stand up the backend foundation — a seeded PostgreSQL database full of synthetic, embedded financial transactions, reachable through a pluggable provider layer.
+**Goal:** Stand up the backend foundation — a seeded SQLite database full of synthetic, embedded financial transactions, reachable through a pluggable provider layer.
 
-**Architecture:** FastAPI project with SQLAlchemy 2.0 models over a local PostgreSQL 18. A synthetic generator produces realistic transactions (with planted anomalies for later verification). A pluggable provider layer wraps Groq (chat) and NVIDIA NIM (embeddings) behind interfaces, so any provider is a drop-in swap. An ingestion pipeline embeds transactions and stores them. Embeddings are stored as a Postgres array column; similarity search is computed in Python (dataset is small — no native vector extension needed).
+**Architecture:** FastAPI project with SQLAlchemy 2.0 models over a local SQLite file. A synthetic generator produces realistic transactions (with planted anomalies for later verification). A pluggable provider layer wraps Groq (chat) and NVIDIA NIM (embeddings) behind interfaces, so any provider is a drop-in swap. An ingestion pipeline embeds transactions and stores them. Embeddings are stored as a JSON column (`list[float]`); similarity search is computed in Python (dataset is small — no native vector extension needed).
 
-**Tech Stack:** Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, SQLAlchemy 2.0, Alembic, PostgreSQL 18, pytest, httpx.
+**Tech Stack:** Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, SQLAlchemy 2.0, Alembic, SQLite, pytest, httpx.
 
-> **Environment note (2026-07-12):** Docker is not installed on this machine and PG18 on Windows lacks the `pgvector` extension (fiddly to build without Docker). Decision: use the existing local PostgreSQL 18, store embeddings as `double precision[]` (Postgres ARRAY), and compute cosine similarity in Python. pgvector/Docker remain a documented production-scale swap, out of scope for this plan.
+> **Environment note (2026-07-18):** Default store is **SQLite** (`sqlite:///./data/findb.db`). Embeddings are JSON lists of dim 1024; cosine similarity stays in Python. Postgres/pgvector/Docker remain a documented production-scale swap (see `docs/superpowers/specs/2026-07-18-sqlite-default-design.md`).
 
 ## Global Constraints
 
 - Python 3.12+.
 - SQLAlchemy 2.0 style (typed `Mapped[...]`, `mapped_column`).
 - Pydantic v2.
-- Embedding vector dimension: **1024** (NVIDIA `nv-embedqa-e5-v5`), stored as `double precision[]` (Postgres `ARRAY(Float)`).
-- Database is the local PostgreSQL 18 (`postgresql+psycopg://finuser:finpass@localhost:5432/findb`). No Docker, no pgvector extension.
+- Embedding vector dimension: **1024** (NVIDIA `nv-embedqa-e5-v5`), stored as JSON `list[float]`.
+- Database is SQLite at `sqlite:///./data/findb.db` (file under `backend/data/`, gitignored).
 - Secrets ONLY via environment / `.env`; `.env` MUST be gitignored. `.env.example` committed with placeholders. NEVER commit real API keys.
 - All dependencies pinned in `pyproject.toml`.
 - Every task ends with passing tests and a commit.
@@ -74,8 +74,8 @@ GROQ_MODEL=llama-3.3-70b-versatile
 NVIDIA_API_KEY=your_nvidia_key_here
 NVIDIA_EMBED_MODEL=nvidia/nv-embedqa-e5-v5
 
-# Database
-DATABASE_URL=postgresql+psycopg://finuser:finpass@localhost:5432/findb
+# Database (SQLite file under backend/data/)
+DATABASE_URL=sqlite:///./data/findb.db
 ```
 
 - [ ] **Step 3: Create `backend/pyproject.toml`**
@@ -89,8 +89,6 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
     "sqlalchemy>=2.0",
-    "psycopg[binary]>=3.2",
-    "pgvector>=0.3.6",
     "alembic>=1.14",
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
@@ -163,7 +161,7 @@ def test_settings_reads_env(monkeypatch):
     monkeypatch.setenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     monkeypatch.setenv("NVIDIA_API_KEY", "n-key")
     monkeypatch.setenv("NVIDIA_EMBED_MODEL", "nvidia/nv-embedqa-e5-v5")
-    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./data/test.db")
 
     s = Settings()
 
@@ -193,7 +191,7 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     nvidia_api_key: str = ""
     nvidia_embed_model: str = "nvidia/nv-embedqa-e5-v5"
-    database_url: str = "postgresql+psycopg://finuser:finpass@localhost:5432/findb"
+    database_url: str = "sqlite:///./data/findb.db"
 
 
 @lru_cache
@@ -215,65 +213,63 @@ git commit -m "feat: add settings loader"
 
 ---
 
-### Task 3: Local database connectivity check
+### Task 3: Local SQLite readiness check
 
 **Files:**
 - Create: `scripts/wait_for_db.py`
 
 **Interfaces:**
-- Consumes: `DATABASE_URL` env (`postgresql+psycopg://finuser:finpass@localhost:5432/findb`).
-- Produces: `scripts/wait_for_db.py`, runnable as `python ../scripts/wait_for_db.py`, which exits 0 when the local Postgres accepts a connection.
-
-**Prerequisite (already done manually by the human before this task):** the `finuser` role and `findb` database exist in the local PostgreSQL 18:
-```sql
-CREATE ROLE finuser LOGIN PASSWORD 'finpass';
-CREATE DATABASE findb OWNER finuser;
-```
+- Consumes: `DATABASE_URL` env (`sqlite:///./data/findb.db`).
+- Produces: `scripts/wait_for_db.py`, runnable as `python ../scripts/wait_for_db.py` from `backend/`, which ensures the SQLite parent directory exists and the DB accepts a connection, then exits 0.
 
 - [ ] **Step 1: Create a readiness checker**
 
 `scripts/wait_for_db.py`:
 ```python
-"""Poll the database until it accepts connections, then exit 0."""
+"""Ensure the SQLite DB path is usable, then exit 0."""
 import sys
-import time
+from pathlib import Path
 
-import psycopg
+from sqlalchemy import create_engine, text
 
 from app.config import get_settings
 
 
 def main() -> int:
-    dsn = get_settings().database_url.replace("+psycopg", "")
-    for _ in range(15):
-        try:
-            with psycopg.connect(dsn, connect_timeout=2):
-                print("DB ready")
-                return 0
-        except Exception as exc:  # noqa: BLE001
-            print(f"waiting for db: {exc}")
-            time.sleep(2)
-    print("DB never became ready", file=sys.stderr)
-    return 1
+    url = get_settings().database_url
+    if url.startswith("sqlite:///"):
+        db_path = Path(url.removeprefix("sqlite:///"))
+        if not db_path.is_absolute():
+            db_path = Path.cwd() / db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        engine = create_engine(url, future=True)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("DB ready")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"DB not ready: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 2: Verify connectivity against the local Postgres**
+- [ ] **Step 2: Verify connectivity**
 
-Run (from `backend/`, with `DATABASE_URL` set in `.env` or env):
+Run (from `backend/`):
 ```bash
 python ../scripts/wait_for_db.py
 ```
-Expected: `DB ready` printed, exit 0. (If it prints `waiting for db: ...` and exits 1, the `finuser`/`findb` setup above was not run — stop and report.)
+Expected: `DB ready` printed, exit 0.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add scripts/wait_for_db.py
-git commit -m "feat: add local postgres readiness check"
+git commit -m "feat: add sqlite readiness check"
 ```
 
 ---
@@ -281,7 +277,7 @@ git commit -m "feat: add local postgres readiness check"
 ### Task 4: Database models, session, and Alembic baseline
 
 **Files:**
-- Modify: `backend/pyproject.toml` (remove the unused `pgvector` dependency)
+- Modify: `backend/pyproject.toml` (remove `psycopg` and `pgvector`)
 - Create: `backend/app/db.py`
 - Create: `backend/app/models.py`
 - Create: `backend/alembic.ini`
@@ -295,13 +291,12 @@ git commit -m "feat: add local postgres readiness check"
 - Consumes: `get_settings().database_url`.
 - Produces:
   - `Base` (DeclarativeBase), `engine`, `SessionLocal`.
-  - `Transaction(id:int, date:date, merchant:str, amount:float, category:str, description:str, is_anomaly:bool, embedding:list[float]|None)` — table `transactions`, `embedding` is `ARRAY(Float)` (a plain Postgres float array; no pgvector).
-  - `Insight(id:int, period:str, summary_text:str, generated_at:datetime)` — table `insights`.
-  - `ChatMessage(id:int, session_id:str, role:str, content:str, tool_calls:dict|None, created_at:datetime)` — table `chat_messages`.
+  - `Transaction(..., embedding:list[float]|None)` — `embedding` is `JSON`.
+  - `Insight`, `ChatMessage` as before.
 
-- [ ] **Step 0: Remove the unused pgvector dependency**
+- [ ] **Step 0: Remove Postgres-only dependencies**
 
-In `backend/pyproject.toml`, delete the line `"pgvector>=0.3.6",` from `dependencies`. (We store embeddings as a plain Postgres float array; no native vector extension.) No reinstall required.
+In `backend/pyproject.toml`, delete `"psycopg[binary]>=3.2",` and `"pgvector>=0.3.6",`. Reinstall the package.
 
 - [ ] **Step 1: Create the DB session module**
 
@@ -317,7 +312,13 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(get_settings().database_url, future=True)
+def _engine_kwargs(url: str) -> dict:
+    if url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    return {}
+
+
+engine = create_engine(get_settings().database_url, future=True, **_engine_kwargs(get_settings().database_url))
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 ```
 
@@ -327,7 +328,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 ```python
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, JSON, Boolean, Date, DateTime, Float, String, Text, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -345,7 +346,7 @@ class Transaction(Base):
     category: Mapped[str] = mapped_column(String(80), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     is_anomaly: Mapped[bool] = mapped_column(Boolean, default=False)
-    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
 
 
 class Insight(Base):
@@ -370,112 +371,24 @@ class ChatMessage(Base):
 
 - [ ] **Step 3: Initialize Alembic and write the baseline migration**
 
-Run (from `backend/`):
-```bash
-alembic init migrations
-```
-Then set `sqlalchemy.url` handling in `backend/migrations/env.py` — replace its body with:
-```python
-from logging.config import fileConfig
-
-from alembic import context
-from sqlalchemy import engine_from_config, pool
-
-from app.config import get_settings
-from app.db import Base
-from app import models  # noqa: F401  (registers tables)
-
-config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
-if config.config_file_name:
-    fileConfig(config.config_file_name)
-
-target_metadata = Base.metadata
-
-
-def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
-
-
-run_migrations_online()
-```
-
-Create `backend/migrations/versions/0001_baseline.py`:
-```python
-"""baseline schema
-
-Revision ID: 0001_baseline
-Revises:
-Create Date: 2026-07-12
-"""
-import sqlalchemy as sa
-from alembic import op
-
-revision = "0001_baseline"
-down_revision = None
-branch_labels = None
-depends_on = None
-
-
-def upgrade() -> None:
-    op.create_table(
-        "transactions",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("date", sa.Date, index=True),
-        sa.Column("merchant", sa.String(200)),
-        sa.Column("amount", sa.Float),
-        sa.Column("category", sa.String(80), index=True),
-        sa.Column("description", sa.Text),
-        sa.Column("is_anomaly", sa.Boolean, server_default=sa.false()),
-        sa.Column("embedding", sa.ARRAY(sa.Float), nullable=True),
-    )
-    op.create_table(
-        "insights",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("period", sa.String(20), index=True),
-        sa.Column("summary_text", sa.Text),
-        sa.Column("generated_at", sa.DateTime, server_default=sa.func.now()),
-    )
-    op.create_table(
-        "chat_messages",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("session_id", sa.String(64), index=True),
-        sa.Column("role", sa.String(16)),
-        sa.Column("content", sa.Text),
-        sa.Column("tool_calls", sa.JSON, nullable=True),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-    )
-
-
-def downgrade() -> None:
-    op.drop_table("chat_messages")
-    op.drop_table("insights")
-    op.drop_table("transactions")
-```
+Same Alembic `env.py` pattern as before (URL from settings). Baseline migration uses `sa.JSON()` for `embedding` (not `ARRAY`).
 
 - [ ] **Step 4: Create the test fixture**
 
-`backend/tests/conftest.py`:
+`backend/tests/conftest.py` — ensure schema exists; clean with `DELETE FROM` (SQLite has no `TRUNCATE … RESTART IDENTITY`):
 ```python
 import pytest
 from sqlalchemy import text
 
-from app.db import SessionLocal, engine
+from app.db import Base, SessionLocal, engine
 
 
 @pytest.fixture(autouse=True)
-def _clean_transactions():
-    """Truncate mutable tables between tests (DB must be migrated first)."""
+def _clean_tables():
+    Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE transactions, insights, chat_messages RESTART IDENTITY"))
+        for table in ("chat_messages", "insights", "transactions"):
+            conn.execute(text(f"DELETE FROM {table}"))
     yield
 
 
@@ -488,48 +401,7 @@ def session():
         s.close()
 ```
 
-- [ ] **Step 5: Write the failing model test**
-
-`backend/tests/test_models.py`:
-```python
-from datetime import date
-
-from app.models import Transaction
-
-
-def test_insert_transaction_with_embedding(session):
-    txn = Transaction(
-        date=date(2026, 6, 1),
-        merchant="Whole Foods",
-        amount=54.20,
-        category="Groceries",
-        description="grocery run",
-        is_anomaly=False,
-        embedding=[0.0] * 1024,
-    )
-    session.add(txn)
-    session.commit()
-
-    fetched = session.get(Transaction, txn.id)
-    assert fetched.merchant == "Whole Foods"
-    assert len(fetched.embedding) == 1024
-```
-
-- [ ] **Step 6: Migrate the DB, then run the test**
-
-Run (from `backend/`, DB up from Task 3):
-```bash
-alembic upgrade head
-pytest tests/test_models.py -v
-```
-Expected: `alembic upgrade head` succeeds; test PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add backend/app/db.py backend/app/models.py backend/alembic.ini backend/migrations backend/tests/conftest.py backend/tests/test_models.py
-git commit -m "feat: add db models, session, and alembic baseline"
-```
+- [ ] **Step 5–7:** Model insert test, `alembic upgrade head`, commit (same assertions as before; embedding length 1024).
 
 ---
 
@@ -1028,15 +900,15 @@ Expected: `Seeded <N> transactions`. This confirms Groq/NVIDIA wiring works with
 ## Self-Review
 
 **Spec coverage (this plan's slice — Backend Foundation):**
-- Local PostgreSQL 18 store (no Docker/pgvector) → Tasks 3, 4 ✓
-- Data model (transactions/insights/chat_messages, `ARRAY(Float)` embedding of dim 1024, `is_anomaly` ground truth) → Task 4 ✓
+- SQLite file store (JSON embeddings, Python cosine) → Tasks 3, 4 ✓
+- Data model (transactions/insights/chat_messages, JSON embedding of dim 1024, `is_anomaly` ground truth) → Task 4 ✓
 - Synthetic generator with planted anomalies → Task 5 ✓
 - Pluggable provider layer (Groq chat + NVIDIA embeddings, swappable) → Tasks 6, 7 ✓
 - Ingestion (embed + store) → Task 8 ✓
 - Secret hygiene (`.env` gitignored, `.env.example`, no committed keys) → Task 1 ✓
-- DB connectivity check against local Postgres → Task 3 ✓
-- Deferred to later plans (correctly out of scope here): RAG agent/tools + eval (Plan 2, incl. Python cosine semantic search), insights + anomaly detection logic (Plan 3), React frontend (Plan 4). Docker/pgvector containerization is a documented production-scale swap, not in these plans.
+- SQLite readiness check → Task 3 ✓
+- Deferred to later plans (correctly out of scope here): RAG agent/tools + eval (Plan 2), insights + anomalies (Plan 3), React frontend (Plan 4). Postgres/pgvector remains a documented production-scale swap.
 
 **Placeholder scan:** No TBD/TODO; every code step contains complete, runnable code. ✓
 
-**Type consistency:** `EmbeddingProvider.embed(texts)->list[list[float]]` used consistently in Tasks 6 and 8; `ARRAY(Float)` embedding / `EMBED_DIM=1024` consistent across models, migration, and tests; `GeneratedTxn` fields consistent between generator (Task 5) and ingestion (Task 8). ✓
+**Type consistency:** `EmbeddingProvider.embed(texts)->list[list[float]]` used consistently in Tasks 6 and 8; JSON embedding / `EMBED_DIM=1024` consistent across models, migration, and tests; `GeneratedTxn` fields consistent between generator (Task 5) and ingestion (Task 8). ✓
