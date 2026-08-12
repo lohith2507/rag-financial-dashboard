@@ -14,7 +14,7 @@ def test_groq_complete_returns_message():
             json={"choices": [{"message": {"role": "assistant", "content": "Hi there"}}]},
         )
     )
-    provider = GroqChatProvider(api_key="test", model="llama-3.3-70b-versatile")
+    provider = GroqChatProvider(api_key="test", model="openai/gpt-oss-120b")
 
     msg = provider.complete([{"role": "user", "content": "hello"}])
 
@@ -29,7 +29,7 @@ def test_groq_passes_tools_through():
             json={"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": []}}]},
         )
     )
-    provider = GroqChatProvider(api_key="test", model="llama-3.3-70b-versatile")
+    provider = GroqChatProvider(api_key="test", model="openai/gpt-oss-120b")
 
     provider.complete([{"role": "user", "content": "spend?"}], tools=[{"type": "function"}])
 
