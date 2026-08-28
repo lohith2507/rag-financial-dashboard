@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_chat_provider
+from app.api.deps import get_optional_chat_provider
 from app.main import app
 from app.models import Transaction
 
@@ -64,7 +64,7 @@ def test_anomalies_endpoint_without_explanations(session):
 
 def test_anomalies_endpoint_with_explanations(session):
     _seed(session)
-    app.dependency_overrides[get_chat_provider] = lambda: CannedChat()
+    app.dependency_overrides[get_optional_chat_provider] = lambda: CannedChat()
     client = TestClient(app)
     try:
         resp = client.get("/anomalies?explain=true")

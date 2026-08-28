@@ -11,6 +11,9 @@ from app.providers.nvidia import NvidiaEmbeddingProvider
 
 def main() -> None:
     settings = get_settings()
+    if not settings.nvidia_api_key.strip():
+        raise SystemExit("NVIDIA_API_KEY is not configured. Set it in .env before seeding.")
+
     embedder = NvidiaEmbeddingProvider(
         api_key=settings.nvidia_api_key, model=settings.nvidia_embed_model
     )
