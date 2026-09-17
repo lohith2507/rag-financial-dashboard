@@ -27,6 +27,12 @@ Copy `.env.example` to `.env` and set your keys (never commit `.env`):
 - `GROQ_API_KEY` — https://console.groq.com/keys
 - `NVIDIA_API_KEY` — https://build.nvidia.com
 
+Optional overrides (defaults match `.env.example`):
+
+- `GROQ_MODEL` — chat model id (default `openai/gpt-oss-120b`)
+- `NVIDIA_EMBED_MODEL` — embedding model id (default `nvidia/nv-embedqa-e5-v5`)
+- `DATABASE_URL` — SQLAlchemy URL (default SQLite under `backend/data/findb.db`)
+
 Default database: SQLite file at `backend/data/findb.db` (no Postgres install required).
 
 ### 2. Backend
@@ -48,6 +54,8 @@ npm run dev
 ```
 
 Open http://localhost:5173 — Vite proxies API calls to http://localhost:8000.
+
+With the backend running, check `GET http://localhost:8000/health` for liveness and open http://localhost:8000/docs for the interactive OpenAPI UI (chat, anomalies, insights, stats).
 
 ## Tech stack
 
