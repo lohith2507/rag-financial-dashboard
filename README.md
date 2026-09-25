@@ -45,6 +45,16 @@ python -m app.seed
 uvicorn app.main:app --reload
 ```
 
+To verify the configured database is reachable (and create the parent directory
+for a relative SQLite URL), run this from `backend`:
+
+```bash
+python ../scripts/wait_for_db.py
+```
+
+The helper prints `DB ready` on success and exits nonzero when the connection
+cannot be established.
+
 ### 3. Frontend
 
 ```powershell
