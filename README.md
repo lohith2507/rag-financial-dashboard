@@ -16,7 +16,7 @@ React (Vite + TS, Tremor)  ──HTTP──>  FastAPI backend
 
 ## Eval results (A vs B)
 
-Run `python -m app.eval.run_eval --limit 25` after seeding to produce measured accuracy in `docs/eval-results.md`. Hybrid agentic RAG (B) vs pure-vector baseline (A) on generator-derived ground truth.
+From the `backend` directory, run `python -m app.eval.run_eval --limit 25` after seeding to produce measured accuracy in `docs/eval-results.md`. Hybrid agentic RAG (B) vs pure-vector baseline (A) on generator-derived ground truth.
 
 ## Quickstart
 
