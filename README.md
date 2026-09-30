@@ -67,6 +67,19 @@ Open http://localhost:5173 — Vite proxies API calls to http://localhost:8000.
 
 With the backend running, check `GET http://localhost:8000/health` for liveness and open http://localhost:8000/docs for the interactive OpenAPI UI (chat, anomalies, insights, stats).
 
+### API routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/chat` | Hybrid agentic RAG chat |
+| `GET` | `/anomalies` | Detected spending anomalies |
+| `GET` | `/insights` | List generated monthly insights |
+| `POST` | `/insights/{period}/generate` | Generate the insight for a period |
+| `GET` | `/stats/by-category` | Spend totals by category |
+| `GET` | `/stats/monthly` | Monthly spend totals |
+| `GET` | `/transactions` | List transactions |
+
 ## Tech stack
 
 | Layer | Choice |
