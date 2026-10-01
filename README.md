@@ -65,6 +65,8 @@ npm run dev
 
 Open http://localhost:5173 — Vite proxies API calls to http://localhost:8000.
 
+Other frontend scripts: `npm run build` type-checks (`tsc -b`) and produces a production bundle, and `npm run preview` serves that bundle locally.
+
 With the backend running, check `GET http://localhost:8000/health` for liveness and open http://localhost:8000/docs for the interactive OpenAPI UI (chat, anomalies, insights, stats).
 
 ### API routes
