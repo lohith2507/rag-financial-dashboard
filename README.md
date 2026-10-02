@@ -22,7 +22,7 @@ From the `backend` directory, run `python -m app.eval.run_eval --limit 25` after
 
 ### 1. Environment
 
-Copy `.env.example` to `.env` and set your keys (never commit `.env`):
+Copy `.env.example` to `.env` at the repo root or under `backend/` (the app loads either path) and set your keys (never commit `.env`):
 
 - `GROQ_API_KEY` — https://console.groq.com/keys
 - `NVIDIA_API_KEY` — https://build.nvidia.com
