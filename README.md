@@ -45,6 +45,8 @@ python -m app.seed
 uvicorn app.main:app --reload
 ```
 
+`python -m app.seed` generates six months of synthetic transactions (seed `42`), embeds them with NVIDIA NIM, and stops with an error if `NVIDIA_API_KEY` is not set.
+
 To verify the configured database is reachable (and create the parent directory
 for a relative SQLite URL), run this from `backend`:
 
