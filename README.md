@@ -33,7 +33,7 @@ Optional overrides (defaults match `.env.example`):
 - `NVIDIA_EMBED_MODEL` — embedding model id (default `nvidia/nv-embedqa-e5-v5`)
 - `DATABASE_URL` — SQLAlchemy URL (default SQLite under `backend/data/findb.db`)
 
-Default database: SQLite file at `backend/data/findb.db` (no Postgres install required).
+Default database: SQLite file at `backend/data/findb.db` (no Postgres install required). The default `DATABASE_URL` (`sqlite:///./data/findb.db`) and the `.env` lookup are both relative to the current directory, so run the backend commands below from `backend/`; otherwise SQLite looks for `data/findb.db` under whatever directory you launched from.
 
 ### 2. Backend
 
