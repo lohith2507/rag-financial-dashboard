@@ -105,9 +105,11 @@ scripts/          DB readiness helper
 
 ## Testing
 
+From the repo root (the second line steps back out of `backend/`):
+
 ```powershell
 cd backend && pytest
-cd frontend && npm test -- --run
+cd ../frontend && npm test -- --run
 ```
 
 ## Production-scale swaps
