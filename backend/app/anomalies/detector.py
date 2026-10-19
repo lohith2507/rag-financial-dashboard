@@ -11,6 +11,14 @@ MIN_CATEGORY_SIZE = 3
 
 
 def detect_anomalies(session, z_threshold: float = Z_THRESHOLD) -> list[dict]:
+    """Flag unusually large spending transactions, per category.
+
+    Income categories in ``SPEND_EXCLUDED`` are ignored, and categories with
+    fewer than ``MIN_CATEGORY_SIZE`` rows or zero variance are skipped. The
+    z-score uses the population standard deviation of each category, and only
+    the high side is flagged (``z > z_threshold``), so unusually small amounts
+    are never reported. Results are sorted by ``z_score``, highest first.
+    """
     txns = session.scalars(
         select(Transaction).where(Transaction.category.notin_(SPEND_EXCLUDED))
     ).all()
