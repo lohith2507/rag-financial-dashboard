@@ -9,6 +9,11 @@ EXPLAIN_SYSTEM = (
 
 
 def explain_anomaly(anomaly: dict, chat: ChatProvider) -> str:
+    """Ask the chat provider for a short plain-English reason an anomaly stands out.
+
+    ``anomaly`` must include ``category_mean`` and ``z_score``. Returns an empty
+    string when the provider replies without any content.
+    """
     user = (
         f"Transaction: {json.dumps(anomaly)}\n"
         f"The category's average transaction is ${anomaly['category_mean']:.2f}; "
