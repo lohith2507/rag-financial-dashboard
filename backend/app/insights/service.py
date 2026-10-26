@@ -16,6 +16,13 @@ INSIGHT_SYSTEM = (
 
 
 def month_stats(session, year: int, month: int) -> dict:
+    """Summarize one calendar month of transactions for the insight prompt.
+
+    ``total_spend`` and ``by_category`` exclude ``SPEND_EXCLUDED`` categories
+    (salary), which are reported separately as ``income``. ``anomaly_count`` is
+    the number of transactions flagged ``is_anomaly`` in that month. Amounts are
+    rounded to 2 decimals; a month with no rows yields zeros and an empty dict.
+    """
     def _in_month(stmt):
         return stmt.where(
             extract("year", Transaction.date) == year,
