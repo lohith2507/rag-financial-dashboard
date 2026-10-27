@@ -14,6 +14,13 @@ def answer_pure_rag(
     embedder: EmbeddingProvider,
     k: int = 8,
 ) -> str:
+    """Answer ``question`` with single-shot RAG, no tool calls.
+
+    Retrieves the top ``k`` transactions by semantic similarity, formats each
+    as ``date | category | merchant | $amount`` context lines, and asks the
+    chat provider once. Serves as the baseline the agent is evaluated
+    against. Returns an empty string if the model returns no content.
+    """
     rows = semantic_search(session, embedder, question, k=k)
     context = "\n".join(
         f"{r['date']} | {r['category']} | {r['merchant']} | ${r['amount']:.2f}"
