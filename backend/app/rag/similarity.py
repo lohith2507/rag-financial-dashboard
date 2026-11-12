@@ -1,3 +1,5 @@
+"""Vector similarity helpers used for semantic search over transaction embeddings."""
+
 import math
 
 
