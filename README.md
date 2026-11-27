@@ -45,7 +45,7 @@ python -m app.seed
 uvicorn app.main:app --reload
 ```
 
-By default `uvicorn` serves the API at http://localhost:8000.
+By default `uvicorn` serves the API at http://localhost:8000. Run `alembic upgrade head` before `python -m app.seed` so the tables exist.
 
 `python -m app.seed` generates six months of synthetic transactions (seed `42`), embeds them with NVIDIA NIM, and stops with an error if `NVIDIA_API_KEY` is not set.
 
